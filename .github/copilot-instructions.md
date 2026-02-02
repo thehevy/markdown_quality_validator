@@ -67,7 +67,7 @@ result = subprocess.run(
 violations = json.loads(result.stdout) if result.stdout else []
 ```
 
-### arkdownlint Configuration
+### Markdownlint Configuration
 
 [.markdownlint.json](../.markdownlint.json) uses relaxed defaults:
 
@@ -77,13 +77,29 @@ violations = json.loads(result.stdout) if result.stdout else []
 
 **When modifying:** Test with `markdownlint --config .markdownlint.json README.md` before committing.
 
-## MCP Server Status
+## Documentation Requirements
 
-**INCOMPLETE:** [mcp-markdown-server/server.py](../mcp-markdown-server/server.py) only has stub functions. To complete:
+**ALL markdown files in this repo must pass validation before committing:**
 
-1. Copy validation logic from [markdown_validator.py](../markdown_validator.py) functions into MCP `@mcp.tool()` decorated functions
-2. Keep function signatures matching the stubs (file_path, auto_fix, root_dir parameters)
-3. Return structured dicts (not print statements) - FastMCP handles JSON serialization
+```bash
+# Validate all documentation
+python3 markdown_validator.py .
+
+# Auto-fix issues (preferred)
+python3 markdown_validator.py . --fix
+
+# Check quality score (must be 100/100 for this repo)
+python3 markdown_validator.py . --score
+```
+
+**Pre-commit hook:** Installed via `./setup-markdown-quality.sh` - automatically validates staged markdown files.
+
+**When editing markdown:**
+
+- Keep lines ≤120 characters (code blocks/tables exempt)
+- Use `<details>` and `<summary>` HTML tags freely
+- First line doesn't need to be H1
+- Run `--fix` before committing to auto-correct violations
 
 ## External Dependencies
 
