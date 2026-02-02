@@ -1,0 +1,39 @@
+name: Markdown Quality Check
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  markdown-quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    
+    - name: Install markdownlint-cli
+      run: npm install -g markdownlint-cli
+    
+    - name: Validate all documentation
+      run: python3 markdown_validator.py .
+    
+    - name: Check quality score
+      run: |
+        SCORE=$(python3 markdown_validator.py . --score | grep -o '[0-9]*')
+        echo "Documentation quality score: $SCORE/100"
+        if [ "$SCORE" -lt 80 ]; then
+          echo "❌ Quality score below threshold (80)"
+          exit 1
+        fi
