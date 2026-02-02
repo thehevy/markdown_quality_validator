@@ -25,7 +25,7 @@ Both implementations wrap `markdownlint-cli` (Node.js) for consistent markdown v
 - [mcp-markdown-server/server.py](../mcp-markdown-server/server.py): MCP server with `check_markdown_file()` and `scan_project_docs()` tools
 - [setup-markdown-quality.sh](../setup-markdown-quality.sh): Installs Git pre-commit hook for automatic validation
 - [.markdownlint.json](../.markdownlint.json): Project-specific rules (120 char lines, HTML details allowed)
-- [.github/workflows/markdown-quality.yml](../workflows/markdown-quality.yml): CI validation with 80/100 score threshold
+- [.github/workflows/markdown-quality.yml](../.github/workflows/markdown-quality.yml): CI validation with 80/100 score threshold
 
 ## Development Workflows
 

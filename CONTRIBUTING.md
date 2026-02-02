@@ -106,7 +106,7 @@ python3 markdown_validator.py . --score
 
 Use clear, descriptive commit messages:
 
-```
+```text
 ✅ Good:
 - "Fix quality score calculation for empty violations"
 - "Add support for custom markdownlint configs"

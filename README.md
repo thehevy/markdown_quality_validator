@@ -65,7 +65,7 @@ Validates markdown files before each commit. Bypass with `git commit --no-verify
 ## Use Cases
 
 | Use Case | Best Solution |
-|----------|--------------|
+| -------- | ------------- |
 | This project with Copilot | Ask Copilot: `@workspace validate documentation` |
 | Other Python projects | Copy `markdown_validator.py` standalone script |
 | Other MCP projects | Setup `mcp-markdown-server/` and register |
