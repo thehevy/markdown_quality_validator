@@ -64,9 +64,21 @@ _ATOMIC_SPAN_RE = re.compile(
 )
 
 
+def _repair_wbr_tags(text: str) -> str:
+    """Repair `<wbr>` tags corrupted by prior splits (e.g. `<wb<wbr>r>`, `<w<wbr>br>`, `<wbr><wbr>`) and normalize `<wbr/>`."""
+    s = re.sub(r"<wbr\s*/?>", "<wbr>", text, flags=re.IGNORECASE)
+    prev = None
+    while prev != s:
+        prev = s
+        s = re.sub(r"<\s*w(?:<wbr>)*b(?:<wbr>)*r(?:<wbr>)*\s*>", "<wbr>", s, flags=re.IGNORECASE)
+        s = re.sub(r"(?:<wbr>){2,}", "<wbr>", s, flags=re.IGNORECASE)
+    return s
+
+
 def _sanitize_table_line(line: str) -> str:
-    """Repair truncated backticks in link labels and corrupted `\\ |` splits inside inline backticks."""
-    s = re.sub(r"\(`\.\.\.\]", "...]", line)
+    """Repair truncated backticks in link labels, corrupted `<wbr>` tags, and `\\ |` splits inside inline backticks."""
+    s = _repair_wbr_tags(line)
+    s = re.sub(r"\(`\.\.\.\]", "...]", s)
     s = re.sub(r"`([^`|]*?)\.\.\.\]", r"\1...]", s)
     s = re.sub(
         r"`([^`]*?)\\\s+\|\s+([^`]*?)`",
@@ -332,41 +344,51 @@ def _is_separator_row(cells: List[str]) -> bool:
 
 
 def _chunk_long_identifier(text: str, chunk_size: int = 26) -> str:
-    """Split a long identifier (`0001-ice-snc-numa-...`) at delimiter boundaries into `<= chunk_size` segments separated by `<wbr>`."""
-    parts = re.split(r"([/_\-.:,])", text)
-    segments: List[str] = []
-    cur = ""
-    for p in parts:
-        if len(cur) + len(p) > chunk_size and cur:
-            segments.append(cur)
-            cur = p
-        else:
-            cur += p
-    if cur:
-        segments.append(cur)
+    """Split a long identifier (`0001-module-feature-name-...`) at delimiter boundaries into `<= chunk_size` segments separated by `<wbr>`, preserving existing `<wbr>` boundaries without splitting across `<wbr>` tags."""
+    cleaned = _repair_wbr_tags(text)
+    existing_subs = [sub for sub in re.split(r"<wbr>", cleaned, flags=re.IGNORECASE) if sub != ""]
+    if not existing_subs:
+        return cleaned
+
     final_segs: List[str] = []
-    for seg in segments:
-        if len(seg) <= chunk_size:
-            final_segs.append(seg)
-        else:
-            for j in range(0, len(seg), chunk_size):
-                final_segs.append(seg[j : j + chunk_size])
+    for sub in existing_subs:
+        if len(sub) <= chunk_size:
+            final_segs.append(sub)
+            continue
+        parts = re.split(r"([/_\-.:,])", sub)
+        segments: List[str] = []
+        cur = ""
+        for p in parts:
+            if len(cur) + len(p) > chunk_size and cur:
+                segments.append(cur)
+                cur = p
+            else:
+                cur += p
+        if cur:
+            segments.append(cur)
+        for seg in segments:
+            if len(seg) <= chunk_size:
+                final_segs.append(seg)
+            else:
+                for j in range(0, len(seg), chunk_size):
+                    final_segs.append(seg[j : j + chunk_size])
     return "<wbr>".join(final_segs)
 
 
 def _clean_cell_tokens(cell: str, max_token_len: int = 40) -> Tuple[str, List[str]]:
     """
     Normalize a single table cell to prevent horizontal scrolling:
-      1. Normalize `<br/>` / `<br />` to `<br>`
+      1. Normalize `<br/>` / `<br />` to `<br>` and `<wbr/>` / corrupted `<wbr>` tags to `<wbr>`
       2. Shorten Markdown link labels that are long file paths or raw URLs
       3. Unwrap multi-word prose sentences erroneously wrapped in backticks inside table cells
-      4. Insert `<wbr>` or space breakpoints in remaining unbreakable tokens > max_token_len
+      4. Insert `<wbr>` or space breakpoints in remaining unbreakable tokens > max_token_len without splitting existing `<wbr>` tags
     """
     fixes: List[str] = []
-    updated = re.sub(r"<br\s*/?>", "<br>", cell.strip(), flags=re.IGNORECASE)
+    updated = _repair_wbr_tags(cell.strip())
+    updated = re.sub(r"<br\s*/?>", "<br>", updated, flags=re.IGNORECASE)
 
     def _shorten_link_label(m: re.Match[str]) -> str:
-        raw_label = m.group(1).strip()
+        raw_label = _repair_wbr_tags(m.group(1).strip())
         url = m.group(2).strip()
         inner = raw_label.strip("`").strip("*")
         if inner.startswith(("http://", "https://")) and len(inner) > 28:
@@ -374,14 +396,15 @@ def _clean_cell_tokens(cell: str, max_token_len: int = 40) -> Tuple[str, List[st
             short_lbl = f"{segs[0]}/{segs[-1][:18]}" if len(segs) >= 2 else inner[:28]
             fixes.append(f"Shortened URL link label '{inner[:28]}...' -> '{short_lbl}'")
             return f"[{short_lbl}]({url})"
-        if "/" in inner and len(inner) > 24:
+        if "/" in inner and len(inner) > 24 and "<wbr>" not in inner.lower():
             base = posixpath.basename(inner.rstrip("/"))
             if base and len(base) < len(inner):
                 fixes.append(f"Shortened path link label '{inner}' -> '{base}'")
                 if raw_label.startswith("`") and raw_label.endswith("`"):
                     return f"[`{base}`]({url})"
                 return f"[{base}]({url})"
-        if len(inner) > max_token_len and " " not in inner and "<wbr>" not in inner:
+        max_lbl_seg = max((len(seg) for seg in re.split(r"<wbr>", inner, flags=re.IGNORECASE)), default=0)
+        if max_lbl_seg > max_token_len and " " not in inner:
             chunked = _chunk_long_identifier(inner, chunk_size=26)
             fixes.append(f"Chunked long link label '{inner[:30]}...'")
             return f"[{chunked}]({url})"
@@ -390,17 +413,21 @@ def _clean_cell_tokens(cell: str, max_token_len: int = 40) -> Tuple[str, List[st
     updated = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _shorten_link_label, updated)
 
     def _unwrap_or_split_backtick(m: re.Match[str]) -> str:
-        inner = m.group(1)
+        inner = _repair_wbr_tags(m.group(1))
+        if "<wbr>" in inner.lower():
+            fixes.append(f"Unwrapped backtick span containing <wbr> '{inner[:30]}...'")
+            return _chunk_long_identifier(inner, chunk_size=24) if " " not in inner else inner
         words = inner.split()
         if len(words) >= 6:
             fixes.append(f"Unwrapped {len(words)}-word prose backtick span")
             return inner
         inner_limit = max(24, max_token_len - 4)
-        if any(len(w) > inner_limit for w in words):
+        if any(max((len(s) for s in re.split(r"<wbr>", w, flags=re.IGNORECASE)), default=0) > inner_limit for w in words):
             new_words: List[str] = []
             for w in words:
-                if len(w) > inner_limit:
-                    new_words.append(f"`{_chunk_long_identifier(w, chunk_size=24)}`")
+                max_w_seg = max((len(s) for s in re.split(r"<wbr>", w, flags=re.IGNORECASE)), default=0)
+                if max_w_seg > inner_limit:
+                    new_words.append(_chunk_long_identifier(w, chunk_size=24))
                 else:
                     new_words.append(f"`{w}`")
             fixes.append(f"Split long token inside backtick span '{inner[:30]}...'")
@@ -430,11 +457,11 @@ def _clean_cell_tokens(cell: str, max_token_len: int = 40) -> Tuple[str, List[st
 
     masked = re.sub(r"https?://[^\s<>\"|`]+", _break_bare_url, masked)
 
-    parts = re.split(r"(\s+|<br>|<wbr>)", masked)
+    parts = re.split(r"(\s+|<br>|<wbr>)", masked, flags=re.IGNORECASE)
     rebuilt: List[str] = []
     for p in parts:
-        if not p or p.isspace() or p in ("<br>", "<wbr>") or "@@PROT" in p:
-            rebuilt.append(p)
+        if not p or p.isspace() or p.lower() in ("<br>", "<wbr>") or "@@PROT" in p:
+            rebuilt.append("<br>" if p.lower() == "<br>" else ("<wbr>" if p.lower() == "<wbr>" else p))
             continue
         vis_len = len(p.replace("**", "").replace("*", ""))
         if vis_len > max_token_len:
@@ -445,14 +472,15 @@ def _clean_cell_tokens(cell: str, max_token_len: int = 40) -> Tuple[str, List[st
     masked = "".join(rebuilt)
 
     for idx, orig in enumerate(protected):
-        if orig.startswith("`") and orig.endswith("`") and len(orig) > max_token_len:
-            inner = orig[1:-1]
-            if " " not in inner:
-                orig = _chunk_long_identifier(inner, chunk_size=26)
+        if orig.startswith("`") and orig.endswith("`"):
+            inner = _repair_wbr_tags(orig[1:-1])
+            max_seg_len = max((len(seg) for seg in re.split(r"<wbr>", inner, flags=re.IGNORECASE)), default=0)
+            if "<wbr>" in inner.lower() or (max_seg_len > max_token_len and " " not in inner):
+                orig = _chunk_long_identifier(inner, chunk_size=26) if " " not in inner else inner
                 fixes.append(f"Converted long single-token code '{inner[:30]}...' to <wbr>-wrapped text")
         masked = masked.replace(f"@@PROT{idx}@@", orig)
 
-    return masked, fixes
+    return _repair_wbr_tags(masked), fixes
 
 
 def _consolidate_table_rows(rows: List[List[str]], max_cols: int) -> List[List[str]]:
