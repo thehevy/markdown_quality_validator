@@ -1,25 +1,39 @@
-# Markdown Agent
+# Markdown Quality Validator
 
-Dual-distribution markdown quality validator with standalone script and MCP server modes.
+Dual-distribution Markdown quality validator and auto-fixer with standalone Python CLI (`markdown_validator.py`) and
+Model Context Protocol (`mcp-markdown-server/server.py`) modes.
+
+## Features & Quality Rules
+
+| Rule ID & Name | Standard Enforced | Auto-Fix (`--fix` / `fix_markdown`) Behavior |
+| --- | --- | --- |
+| **`MD-SEP`**<br>Compact Separator | Always use compact `\| --- \|` separator cells with single-space margins. Never use `\| ------ \|` or `\| :--- \|`. | Rewrites all separator rows to `\| --- \|`. |
+| **`MD-PAD`**<br>No Space-Padding | Never pad table cells with trailing spaces (`.ljust()`) to visually align vertical pipes (`\|`) across rows. | Strips multi-space cell padding to `\| cell \|`. |
+| **`MD-COLS`**<br>Column Limit | Keep tables to `<= 5` columns in standard docs (`<= 3` columns in `--strict-3col` portrait print mode). | Stacks overflow columns vertically using `<br><strong>Header:</strong> Value`. |
+| **`MD-TOKEN`**<br>Short Tokens & Basenames | Use short file basenames for links ([server.py](mcp-<wbr>markdown<wbr>-server/<wbr>server.py)) and unwrap multi-word prose backticks in table cells. | Shortens long link labels to basenames and unwraps multi-word prose backticks. |
+| **`MD-WRAP`**<br>`<= 120`-Char Line Wrap | Wrap prose, list items, and blockquotes at `<= 120` chars (`MD013`), align list continuation indent (`MD007`), and keep blank lines around lists (`MD032`). | Wraps long lines cleanly without splitting `[label](url)` links or inline code spans. |
 
 ## Quick Start
 
-### Standalone Script (Copy to Any Project)
+### Standalone Script (Zero-Dependency Python 3)
 
 ```bash
-# Copy to project
+# Copy to any project
 cp markdown_validator.py /path/to/other-project/
 
-# Run validation
-python3 markdown_validator.py
+# Run validation (default max 5 columns per table)
+python3 markdown_validator.py .
 
-# Auto-fix all issues
-python3 markdown_validator.py --fix
+# Auto-fix all compact table, padding, column width, and line-wrap issues
+python3 markdown_validator.py . --fix
+
+# Enforce strict 3-column portrait print mode
+python3 markdown_validator.py . --strict-3col --fix
 
 # Check single file
 python3 markdown_validator.py README.md --fix
 
-# Get quality score
+# Get repository quality score (0-100)
 python3 markdown_validator.py . --score
 ```
 
@@ -32,7 +46,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Add to MCP config (`~/Library/Application Support/Claude/claude_desktop_config.json` or similar):
+Add to your MCP configuration (`claude_desktop_config.json`, `.vscode/mcp.json`, or `mcp_config.json`):
 
 ```json
 {
@@ -50,7 +64,7 @@ Add to MCP config (`~/Library/Application Support/Claude/claude_desktop_config.j
 ### Prerequisites
 
 ```bash
-# Install markdownlint-cli (required)
+# Optional: Install markdownlint-cli for external CLI hooks
 npm install -g markdownlint-cli
 ```
 
@@ -60,20 +74,17 @@ npm install -g markdownlint-cli
 ./setup-markdown-quality.sh
 ```
 
-Validates markdown files before each commit. Bypass with `git commit --no-verify`.
+Validates Markdown files before each commit. Bypass with `git commit --no-verify`.
 
 ## Use Cases
 
-| Use Case | Best Solution |
-| -------- | ------------- |
-| This project with Copilot | Ask Copilot: `@workspace validate documentation` |
-| Other Python projects | Copy `markdown_validator.py` standalone script |
-| Other MCP projects | Setup `mcp-markdown-server/` and register |
-| Any Git project | Install pre-commit hook with `setup-markdown-quality.sh` |
-| CI/CD pipelines | Copy GitHub Action workflow |
-| Real-time editing | Install VSCode markdownlint extension |
-
-All solutions use the same `markdownlint-cli` engine for consistent quality standards.
+| Use Case | Recommended Solution |
+| --- | --- |
+| **GitHub Copilot / IDE Chat** | Ask Copilot: `@workspace validate documentation` |
+| **Standalone Python Projects** | Copy `markdown_validator.py` and run `python3 markdown_validator.py . --fix` |
+| **MCP-Enabled AI Assistants** | Register `mcp-markdown-server/server.py` (`validate_markdown`, `fix_markdown`, `validate_mermaid`, `check_links`) |
+| **Git Pre-Commit Gate** | Install pre-commit hook with `./setup-markdown-quality.sh` |
+| **CI/CD Pipelines** | Use [markdown-quality.yml](.github/workflows/markdown-quality.yml) |
 
 ## Configuration
 
@@ -82,22 +93,16 @@ Edit [.markdownlint.json](.markdownlint.json) to customize rules:
 ```json
 {
   "MD013": { "line_length": 120 },
-  "MD033": { "allowed_elements": ["details", "summary"] },
+  "MD033": { "allowed_elements": ["details", "summary", "br", "wbr", "strong", "code", "sup", "sub"] },
   "MD041": false
 }
 ```
 
 ## Quality Scoring
 
-- **100 points**: Perfect documentation
-- **-2 points** per violation
-- **Minimum**: 0 points
-
-CI/CD enforces ≥80/100 threshold.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution guidelines.
+- **100 points**: Zero violations across all checked Markdown files
+- **Deduction**: `-2` points per violation (minimum `0`)
+- **CI Threshold**: `80/100` (configurable in workflow)
 
 ## License
 

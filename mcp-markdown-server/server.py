@@ -1,99 +1,83 @@
-from fastmcp import FastMCP
-import subprocess
-import json
+#!/usr/bin/env python3
+"""
+MCP Server exposing validate_markdown, fix_markdown, validate_mermaid, check_links,
+check_markdown_file, and scan_project_docs backed by markdown_validator.py.
+"""
+
+from __future__ import annotations
+
+import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict
 
-mcp = FastMCP("Markdown Quality Server")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-def calculate_quality_score(violations: List) -> int:
-    """Returns 0-100 quality score."""
-    if not violations:
-        return 100
-    score = 100 - (len(violations) * 2)
-    return max(0, score)
+from markdown_validator import (
+    check_markdown_quality,
+    check_relative_links,
+    validate_all_documentation,
+    validate_and_fix_markdown_text,
+    validate_mermaid_blocks,
+)
 
-@mcp.tool()
-def check_markdown_file(file_path: str, auto_fix: bool = False) -> Dict:
-    """Check markdown file quality and optionally fix issues."""
-    violations = []
-    
-    # Run markdownlint
-    try:
-        result = subprocess.run(
-            ["markdownlint", "--json", file_path],
-            capture_output=True,
-            text=True
-        )
-        if result.stdout:
-            violations = json.loads(result.stdout)
-    except FileNotFoundError:
-        return {"error": "markdownlint-cli not installed. Run: npm install -g markdownlint-cli"}
-    except Exception as e:
-        return {"error": str(e)}
-    
-    if auto_fix and violations:
-        # Auto-fix using markdownlint --fix
-        subprocess.run(["markdownlint", "--fix", file_path], check=False)
-        
-        # Re-check
-        result = subprocess.run(
-            ["markdownlint", "--json", file_path],
-            capture_output=True,
-            text=True
-        )
-        new_violations = json.loads(result.stdout) if result.stdout else []
-        fixed_count = len(violations) - len(new_violations)
-        
-        return {
-            "file": file_path,
-            "original_violations": len(violations),
-            "remaining_violations": len(new_violations),
-            "fixes_applied": fixed_count,
-            "quality_score": calculate_quality_score(new_violations)
-        }
-    
+try:
+    from fastmcp import FastMCP
+    mcp = FastMCP("Markdown Quality Server")
+except ImportError:
+    mcp = None
+
+
+def validate_markdown(file_path: str = "", markdown_text: str = "", max_cols: int = 5) -> Dict[str, Any]:
+    """Validate Markdown file or inline text against compact '| --- |' table and line-wrapping rules."""
+    if file_path:
+        return check_markdown_quality(file_path, auto_fix=False, max_cols=max_cols)
+    _, issues = validate_and_fix_markdown_text(markdown_text, auto_fix=False, max_cols=max_cols)
+    return {"valid": len(issues) == 0, "issue_count": len(issues), "issues": issues}
+
+
+def fix_markdown(file_path: str = "", markdown_text: str = "", max_cols: int = 5) -> Dict[str, Any]:
+    """Auto-fix Markdown tables to compact '| --- |' separators, strip cell padding, and wrap long lines."""
+    if file_path:
+        return check_markdown_quality(file_path, auto_fix=True, max_cols=max_cols)
+    fixed, remaining = validate_and_fix_markdown_text(markdown_text, auto_fix=True, max_cols=max_cols)
     return {
-        "file": file_path,
-        "violations": len(violations),
-        "details": violations[:10],
-        "quality_score": calculate_quality_score(violations)
+        "valid": len(remaining) == 0,
+        "fixed_markdown": fixed,
+        "remaining_issue_count": len(remaining),
+        "remaining_issues": remaining,
     }
 
-@mcp.tool()
-def scan_project_docs(root_dir: str = ".") -> Dict:
-    """Scan all markdown files in project."""
-    markdown_files = list(Path(root_dir).rglob("*.md"))
-    
-    # Exclude common ignored directories
-    excluded = {'.git', 'node_modules', 'venv', '.venv', 'dist', 'build'}
-    markdown_files = [
-        f for f in markdown_files 
-        if not any(part.startswith('.') or part in excluded for part in f.parts)
-    ]
-    
-    results = []
-    total_violations = 0
-    
-    for md_file in markdown_files:
-        result = check_markdown_file(str(md_file), auto_fix=False)
-        if 'violations' in result and result['violations'] > 0:
-            total_violations += result['violations']
-            results.append({
-                "file": str(md_file),
-                "violations": result['violations'],
-                "score": result['quality_score']
-            })
-    
-    avg_score = sum(r['score'] for r in results) / len(results) if results else 100
-    
-    return {
-        "total_files": len(markdown_files),
-        "files_with_issues": len(results),
-        "total_violations": total_violations,
-        "average_score": round(avg_score, 1),
-        "problem_files": sorted(results, key=lambda x: x['violations'], reverse=True)[:10]
-    }
+
+def validate_mermaid(file_path: str = "", markdown_text: str = "") -> Dict[str, Any]:
+    """Validate Mermaid fenced code blocks in a file or inline Markdown string."""
+    txt = Path(file_path).read_text(encoding="utf-8", errors="ignore") if file_path else markdown_text
+    return validate_mermaid_blocks(txt)
+
+
+def check_links(file_path: str) -> Dict[str, Any]:
+    """Verify all relative and file:/// links in a Markdown file resolve on disk."""
+    return check_relative_links(Path(file_path))
+
+
+if mcp is not None:
+    mcp.tool()(validate_markdown)
+    mcp.tool()(fix_markdown)
+    mcp.tool()(validate_mermaid)
+    mcp.tool()(check_links)
+
+    @mcp.tool()
+    def check_markdown_file(file_path: str, auto_fix: bool = False, max_cols: int = 5) -> Dict[str, Any]:
+        """Backward-compatible tool: check or auto-fix a Markdown file."""
+        return check_markdown_quality(file_path, auto_fix=auto_fix, max_cols=max_cols)
+
+    @mcp.tool()
+    def scan_project_docs(root_dir: str = ".", auto_fix: bool = False, max_cols: int = 5) -> Dict[str, Any]:
+        """Backward-compatible tool: scan all Markdown files in a project."""
+        return validate_all_documentation(root_dir, auto_fix=auto_fix, max_cols=max_cols)
+
 
 if __name__ == "__main__":
-    mcp.run()
+    if mcp is not None:
+        mcp.run()
