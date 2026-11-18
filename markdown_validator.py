@@ -355,7 +355,7 @@ def _chunk_long_identifier(text: str, chunk_size: int = 26) -> str:
         if len(sub) <= chunk_size:
             final_segs.append(sub)
             continue
-        parts = re.split(r"([/_\-.:,])", sub)
+        parts = re.split(r"([/\\_\-.:,])", sub)
         segments: List[str] = []
         cur = ""
         for p in parts:
